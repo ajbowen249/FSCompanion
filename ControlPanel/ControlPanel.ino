@@ -22,24 +22,63 @@
 #define HTTP_BUFFER_SIZE 1024
 char httpRecvBuffer[HTTP_BUFFER_SIZE];
 
+#define THROTTLE_ENCODER_A 14
+#define THROTTLE_ENCODER_B 12
+
+#define THROTTLE_SENSITIVITY 2
+
 Adafruit_SSD1306 display1(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 struct SimProps {
     double throttle;
 };
 
+struct SimPropsState {
+    bool throttleDirty;
+};
+
+SimProps props;
+SimPropsState propsState;
+bool transacting = false;
+
+void ICACHE_RAM_ATTR onThrottleEncoderAChanged() {
+    if (transacting) {
+        return;
+    }
+
+    detachInterrupt(digitalPinToInterrupt(THROTTLE_ENCODER_A));
+    auto aValue = digitalRead(THROTTLE_ENCODER_A);
+    auto bValue = digitalRead(THROTTLE_ENCODER_B);
+
+    if (aValue == bValue) {
+        props.throttle += THROTTLE_SENSITIVITY;
+    } else {
+        props.throttle -= THROTTLE_SENSITIVITY;
+    }
+
+    if (props.throttle > 100) {
+        props.throttle = 100;
+    } else if (props.throttle < 0) {
+        props.throttle = 0;
+    }
+
+    propsState.throttleDirty = true;
+    attachInterrupt(digitalPinToInterrupt(THROTTLE_ENCODER_A), onThrottleEncoderAChanged, CHANGE);
+}
+
 void setup() {
     Serial.begin(9600);
     initDisplay1();
     connectToWifi(DEFAULT_WIFI_NETWORK, DEFAULT_WIFI_PASSWORD);
+    pinMode(THROTTLE_ENCODER_A, INPUT);
+    pinMode(THROTTLE_ENCODER_B, INPUT);
+    attachInterrupt(digitalPinToInterrupt(THROTTLE_ENCODER_A), onThrottleEncoderAChanged, CHANGE);
 }
 
 void loop() {
-    delay(100);
-    SimProps props;
-    if (!getSimProps(props)) {
+    if (!transactSimProps(props)) {
         return;
-    }
+     }
 
     display1.clearDisplay();
     display1.setTextSize(1);
@@ -50,21 +89,36 @@ void loop() {
     display1.println("%");
 
     display1.display();
+
+    delay(100);
 }
 
-bool getSimProps(SimProps& props) {
+bool transactSimProps(SimProps& props) {
+    transacting = true;
+    StaticJsonDocument<1024> updateJson;
+    if (propsState.throttleDirty) {
+        updateJson["throttle"] = props.throttle;
+    }
+
+    String out;
+    serializeJson(updateJson, out);
+
     WiFiClient client;
     client.setTimeout(500);
     if (!client.connect(DEFAULT_IP_ADDRESS, DEFAULT_PORT)) {
         Serial.println("Failed to connect.");
+        transacting = false;
         return false;
     }
 
-    client.println("GET /sim_props HTTP/1.1");
+    client.println("POST /sim_props HTTP/1.1");
     client.print("Host: ");
     client.println(DEFAULT_IP_ADDRESS);
     client.println("Connection: close");
+    client.print("Content-Length: ");
+    client.println(out.length());
     client.println();
+    client.println(out);
 
     for (int i = 0; i < HTTP_BUFFER_SIZE; i++) {
         httpRecvBuffer[i] = 0;
@@ -81,12 +135,14 @@ bool getSimProps(SimProps& props) {
 
     if (bufferIndex == 0) {
         Serial.println("No data.");
+        transacting = false;
         return false;
     }
 
     char* withoutHeaders = strstr(httpRecvBuffer, "\r\n\r\n");
     if (withoutHeaders == NULL) {
         Serial.println("did not find body");
+        transacting = false;
         return false;
     }
 
@@ -95,6 +151,7 @@ bool getSimProps(SimProps& props) {
     withoutHeaders = strstr(withoutHeaders, "\r\n");
     if (withoutHeaders == NULL) {
         Serial.println("did not find body after length");
+        transacting = false;
         return false;
     }
 
@@ -106,11 +163,14 @@ bool getSimProps(SimProps& props) {
     if (deserializeJson(doc, withoutHeaders) != DeserializationError::Ok) {
         Serial.println("failed to parse");
         Serial.println(withoutHeaders);
+        transacting = false;
         return false;
     }
 
     props.throttle = doc["throttle"];
 
+    transacting = false;
+    propsState.throttleDirty = false;
     return true;
 }
 

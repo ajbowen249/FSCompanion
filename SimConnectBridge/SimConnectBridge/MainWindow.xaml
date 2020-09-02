@@ -5,11 +5,9 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:SimConnectBridge"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
+        Title="SimConnect Bridge Status" Height="80" Width="330">
     <StackPanel>
-        <StackPanel Orientation="Horizontal">
-            <TextBlock Text="Throttle: " />
-            <TextBlock Name="throttleOutput" Text="0" />
-        </StackPanel>
+         <TextBlock Name="ConnectedStatus" Text="Unknown"/>
+        <Button Name="ReconnectButton">Reconnect</Button>
     </StackPanel>
 </Window>

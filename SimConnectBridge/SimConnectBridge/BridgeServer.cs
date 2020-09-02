@@ -9,6 +9,7 @@ namespace SimConnectBridge {
         HttpListener _server;
         Task _serverTask;
         DataContractJsonSerializer _simPropsSerializer = new DataContractJsonSerializer(typeof(SimConnectAdaptor.SimProps));
+        DataContractJsonSerializer _uUpdateSerializer = new DataContractJsonSerializer(typeof(SimConnectAdaptor.SimPropsUpdate));
 
         public BridgeServer(SimConnectAdaptor adaptor) {
             _adaptor = adaptor;
@@ -27,6 +28,8 @@ namespace SimConnectBridge {
                 if (path == "/sim_props") {
                     if (context.Request.HttpMethod == "GET") {
                         getAllSimProps(context);
+                    } else if (context.Request.HttpMethod == "POST") {
+                        setSimProps(context);
                     }
                 }
 
@@ -43,6 +46,18 @@ namespace SimConnectBridge {
             var simProps = _adaptor.GetSimProps();
             var output = context.Response.OutputStream;
             _simPropsSerializer.WriteObject(output, simProps);
+            output.Close();
+        }
+
+        private void setSimProps(HttpListenerContext context) {
+            var update = (SimConnectAdaptor.SimPropsUpdate)_uUpdateSerializer.ReadObject(context.Request.InputStream);
+            var output = context.Response.OutputStream;
+            if (update != null) {
+                var props = _adaptor.SetSimProps(update);
+                _simPropsSerializer.WriteObject(output, props);
+            } else {
+                _simPropsSerializer.WriteObject(output, _adaptor.GetSimProps());
+            }
             output.Close();
         }
     }

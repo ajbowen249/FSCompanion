@@ -26,6 +26,12 @@ namespace SimConnectBridge {
             public double throttle;
         }
 
+        [DataContract]
+        public class SimPropsUpdate {
+            [DataMember]
+            public double? throttle;
+        }
+
         private const int WM_USER_SIMCONNECT = 0x0402;
         private const uint SC_UserId = 0;
 
@@ -40,8 +46,7 @@ namespace SimConnectBridge {
             _handleSource = HwndSource.FromHwnd(_handle);
             _handleSource.AddHook(HandleSimConnectEvents);
 
-            _simConnect = new SimConnect("SimConnect Bridge", _handle, WM_USER_SIMCONNECT, null, 0);
-            ConfigureSimConnectData();
+            TryConnect();
         }
 
         public SimProps GetSimProps() {
@@ -50,14 +55,53 @@ namespace SimConnectBridge {
             }
         }
 
-        private void ConfigureSimConnectData() {
-            _simConnect.OnRecvSimobjectData += new SimConnect.RecvSimobjectDataEventHandler(onReceiveSimObjectData);
-            _simConnect.AddToDataDefinition(Definitions.Throttle, "GENERAL ENG THROTTLE LEVER POSITION:1", "percent", SIMCONNECT_DATATYPE.FLOAT64, 0.0f, SimConnect.SIMCONNECT_UNUSED);
-            _simConnect.RegisterDataDefineStruct<ThrottleControl>(Definitions.Throttle);
-            _simConnect.RequestDataOnSimObject(Definitions.Throttle, Definitions.Throttle, SC_UserId, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+        public SimProps SetSimProps(SimPropsUpdate update) {
+            lock (_rwLock) {
+                if (update.throttle != null) {
+                    _simProps.throttle = (double)update.throttle;
+                }
+
+                if (!IsConnected) {
+                    return _simProps;
+                }
+
+                ThrottleControl tc;
+                tc.throttlePercent = _simProps.throttle;
+
+                _simConnect.SetDataOnSimObject(Definitions.Throttle, (uint)SIMCONNECT_SIMOBJECT_TYPE.USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, tc);
+
+                return _simProps;
+            }
         }
 
-        private void onReceiveSimObjectData(SimConnect sender, SIMCONNECT_RECV_SIMOBJECT_DATA data) {
+
+        public void TryConnect() {
+            if (_simConnect == null) {
+                try {
+                    _simConnect = new SimConnect("SimConnect Bridge", _handle, WM_USER_SIMCONNECT, null, 0);
+                    ConfigureSimConnectData();
+                } catch {
+                    _simConnect = null;
+                }
+            }
+        }
+
+        public bool IsConnected {
+            get { return _simConnect != null; }
+        }
+
+        private void ConfigureSimConnectData() {
+            _simConnect.OnRecvSimobjectData += new SimConnect.RecvSimobjectDataEventHandler(OnReceiveSimObjectData);
+            _simConnect.AddToDataDefinition(Definitions.Throttle, "GENERAL ENG THROTTLE LEVER POSITION:1", "percent", SIMCONNECT_DATATYPE.FLOAT64, 0.0f, SimConnect.SIMCONNECT_UNUSED);
+            _simConnect.RegisterDataDefineStruct<ThrottleControl>(Definitions.Throttle);
+            _simConnect.RequestDataOnSimObject(Definitions.Throttle, Definitions.Throttle, SC_UserId, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.CHANGED, 0, 0, 0);
+        }
+
+        private void OnDisconnected() {
+            _simConnect = null;
+        }
+
+        private void OnReceiveSimObjectData(SimConnect sender, SIMCONNECT_RECV_SIMOBJECT_DATA data) {
             lock (_rwLock) {
                 switch((Definitions)data.dwRequestID) {
                     case Definitions.Throttle:
@@ -81,8 +125,14 @@ namespace SimConnectBridge {
 
             switch (message) {
                 case WM_USER_SIMCONNECT: {
-                        _simConnect.ReceiveMessage();
-                        isHandled = true;
+                        if (_simConnect != null) {
+                            try {
+                                _simConnect.ReceiveMessage();
+                                isHandled = true;
+                            } catch {
+                                OnDisconnected();
+                            }
+                        }
                     }
                     break;
 
