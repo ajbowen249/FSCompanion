@@ -22,8 +22,12 @@
 #define HTTP_BUFFER_SIZE 1024
 char httpRecvBuffer[HTTP_BUFFER_SIZE];
 
-#define THROTTLE_ENCODER_A 14
-#define THROTTLE_ENCODER_B 12
+#define SH_IN_DAT 14
+#define SH_IN_CLK 12
+#define SH_IN_LAT 13
+
+byte lastA = 0;
+byte lastB = 0;
 
 #define THROTTLE_SENSITIVITY 2
 
@@ -41,44 +45,60 @@ SimProps props;
 SimPropsState propsState;
 bool transacting = false;
 
-void ICACHE_RAM_ATTR onThrottleEncoderAChanged() {
+byte poll() {
+    digitalWrite(SH_IN_LAT, HIGH);
+    delayMicroseconds(20);
+    digitalWrite(SH_IN_LAT, LOW);
+    digitalWrite(SH_IN_CLK, LOW);
+    return shiftIn(SH_IN_DAT, SH_IN_CLK, MSBFIRST);
+}
+
+void ICACHE_RAM_ATTR pollInputReg() {
     if (transacting) {
         return;
     }
 
-    detachInterrupt(digitalPinToInterrupt(THROTTLE_ENCODER_A));
-    auto aValue = digitalRead(THROTTLE_ENCODER_A);
-    auto bValue = digitalRead(THROTTLE_ENCODER_B);
+    auto b = poll();
+    auto newA = b & 0x01;
+    auto newB = b & 0x02;
 
-    if (aValue == bValue) {
-        props.throttle += THROTTLE_SENSITIVITY;
-    } else {
-        props.throttle -= THROTTLE_SENSITIVITY;
+    if (newA && !lastA) {
+        if (!newB) {
+            props.throttle += THROTTLE_SENSITIVITY;
+        } else {
+            props.throttle -= THROTTLE_SENSITIVITY;
+        }
+
+        propsState.throttleDirty = true;
     }
 
-    if (props.throttle > 100) {
-        props.throttle = 100;
-    } else if (props.throttle < 0) {
-        props.throttle = 0;
-    }
-
-    propsState.throttleDirty = true;
-    attachInterrupt(digitalPinToInterrupt(THROTTLE_ENCODER_A), onThrottleEncoderAChanged, CHANGE);
+    lastA = newA;
+    lastB = newB;
 }
 
 void setup() {
     Serial.begin(9600);
     initDisplay1();
     connectToWifi(DEFAULT_WIFI_NETWORK, DEFAULT_WIFI_PASSWORD);
-    pinMode(THROTTLE_ENCODER_A, INPUT);
-    pinMode(THROTTLE_ENCODER_B, INPUT);
-    attachInterrupt(digitalPinToInterrupt(THROTTLE_ENCODER_A), onThrottleEncoderAChanged, CHANGE);
+    pinMode(SH_IN_DAT, INPUT);
+    pinMode(SH_IN_CLK, OUTPUT);
+    pinMode(SH_IN_LAT, OUTPUT);
+
+    auto initial = poll();
+    lastA = initial & 0x01;
+    lastB = initial & 0x02;
+
+    timer1_attachInterrupt(pollInputReg);
+    timer1_enable(TIM_DIV16, TIM_EDGE, TIM_LOOP);
+    timer1_write(10000);
 }
 
 void loop() {
-    if (!transactSimProps(props)) {
-        return;
-     }
+    //if (!transactSimProps(props)) {
+    //    return;
+    //}
+
+    transactSimProps(props);
 
     display1.clearDisplay();
     display1.setTextSize(1);
