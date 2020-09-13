@@ -56,6 +56,8 @@ struct Inputs {
     bool b;
     bool tl;
     bool bl;
+    bool tr;
+    bool br;
 };
 
 Inputs inputs;
@@ -82,23 +84,27 @@ byte customShiftIn(int myDataPin, int myClockPin) {
     return myDataIn;
 }
 
-byte poll() {
+uint16_t poll() {
     digitalWrite(SH_IN_LAT, HIGH);
     delayMicroseconds(20);
     digitalWrite(SH_IN_LAT, LOW);
     digitalWrite(SH_IN_CLK, LOW);
-    return customShiftIn(SH_IN_DAT, SH_IN_CLK);
+    uint16_t out = customShiftIn(SH_IN_DAT, SH_IN_CLK);
+    out <<= 8;
+    return out | customShiftIn(SH_IN_DAT, SH_IN_CLK);
 }
 
-void processInputs(byte raw) {
-    inputs.dpad.left  = raw & 0x01;
-    inputs.dpad.up    = raw & 0x02;
-    inputs.dpad.down  = raw & 0x04;
-    inputs.dpad.right = raw & 0x08;
-    inputs.a =  raw & 0x10;
-    inputs.b =  raw & 0x20;
-    inputs.tl = raw & 0x40;
-    inputs.bl = raw & 0x80;
+void processInputs(uint16_t raw) {
+    inputs.dpad.left  = raw & 0x0100;
+    inputs.dpad.up    = raw & 0x0200;
+    inputs.dpad.down  = raw & 0x0400;
+    inputs.dpad.right = raw & 0x0800;
+    inputs.a =  raw & 0x1000;
+    inputs.b =  raw & 0x2000;
+    inputs.tl = raw & 0x4000;
+    inputs.bl = raw & 0x8000;
+    inputs.tr = raw & 0x0020;
+    inputs.br = raw & 0x0010;
 }
 
 void ICACHE_RAM_ATTR pollInputReg() {
@@ -170,7 +176,8 @@ void setup() {
 }
 
 void loop() {
-    processInputs(poll());
+    auto raw = poll();
+    processInputs(raw);
     displayButtonDebugState();
 
     delay(100);
@@ -403,6 +410,8 @@ void displayButtonDebugState() {
     drawButtonState(57, 48, inputs.b);
     drawButtonState( 5,  6, inputs.tl);
     drawButtonState( 5,  18, inputs.bl);
+    drawButtonState(17,  6, inputs.tr);
+    drawButtonState(17,  18, inputs.br);
 
     mainDisplay.display();
 }
