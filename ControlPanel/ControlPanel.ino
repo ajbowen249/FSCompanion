@@ -14,7 +14,8 @@
 #define DEFAULT_IP_ADDRESS "10.0.0.185"
 #define DEFAULT_PORT 8080
 
-#define SCREEN_1_ADDR 0x3C
+#define MAIN_SCREEN_ADDR 0x3C
+#define SCND_SCREEN_ADDR 0x3D
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -31,7 +32,8 @@ byte lastB = 0;
 
 #define THROTTLE_SENSITIVITY 2
 
-Adafruit_SSD1306 display1(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+Adafruit_SSD1306 mainDisplay(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+Adafruit_SSD1306 secondaryDisplay(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 struct SimProps {
     double throttle;
@@ -41,24 +43,78 @@ struct SimPropsState {
     bool throttleDirty;
 };
 
+struct DPad {
+    bool left;
+    bool up;
+    bool down;
+    bool right;
+};
+
+struct Inputs {
+    DPad dpad;
+    bool a;
+    bool b;
+    bool tl;
+    bool bl;
+};
+
+Inputs inputs;
+
 SimProps props;
 SimPropsState propsState;
 bool transacting = false;
+
+byte customShiftIn(int myDataPin, int myClockPin) {
+    int temp = 0;
+    byte myDataIn = 0;
+
+    for (int i=7; i>=0; i--) {
+        digitalWrite(myClockPin, 0);
+        delayMicroseconds(2);
+        temp = digitalRead(myDataPin);
+        if (temp) {
+            myDataIn = myDataIn | (1 << i);
+        }
+
+        digitalWrite(myClockPin, 1);
+    }
+
+    return myDataIn;
+}
 
 byte poll() {
     digitalWrite(SH_IN_LAT, HIGH);
     delayMicroseconds(20);
     digitalWrite(SH_IN_LAT, LOW);
     digitalWrite(SH_IN_CLK, LOW);
-    return shiftIn(SH_IN_DAT, SH_IN_CLK, MSBFIRST);
+    return customShiftIn(SH_IN_DAT, SH_IN_CLK);
+}
+
+void processInputs(byte raw) {
+    inputs.dpad.left  = raw & 0x01;
+    inputs.dpad.up    = raw & 0x02;
+    inputs.dpad.down  = raw & 0x04;
+    inputs.dpad.right = raw & 0x08;
+    inputs.a =  raw & 0x10;
+    inputs.b =  raw & 0x20;
+    inputs.tl = raw & 0x40;
+    inputs.bl = raw & 0x80;
 }
 
 void ICACHE_RAM_ATTR pollInputReg() {
+    timer1_detachInterrupt();
     if (transacting) {
         return;
     }
 
     auto b = poll();
+    processInputs(b);
+
+    timer1_attachInterrupt(pollInputReg);
+    timer1_enable(TIM_DIV16, TIM_EDGE, TIM_LOOP);
+    timer1_write(10000);
+
+    return;
     auto newA = b & 0x01;
     auto newB = b & 0x02;
 
@@ -77,38 +133,63 @@ void ICACHE_RAM_ATTR pollInputReg() {
 }
 
 void setup() {
-    Serial.begin(9600);
-    initDisplay1();
-    connectToWifi(DEFAULT_WIFI_NETWORK, DEFAULT_WIFI_PASSWORD);
     pinMode(SH_IN_DAT, INPUT);
     pinMode(SH_IN_CLK, OUTPUT);
     pinMode(SH_IN_LAT, OUTPUT);
 
-    auto initial = poll();
-    lastA = initial & 0x01;
-    lastB = initial & 0x02;
+    digitalWrite(SH_IN_LAT, LOW);
+    digitalWrite(SH_IN_CLK, HIGH);
+    delay(100);
 
-    timer1_attachInterrupt(pollInputReg);
-    timer1_enable(TIM_DIV16, TIM_EDGE, TIM_LOOP);
-    timer1_write(10000);
+    Serial.begin(9600);
+    initDisplays();
+
+    mainDisplay.clearDisplay();
+    mainDisplay.setTextSize(1);
+    mainDisplay.setTextColor(SSD1306_WHITE);
+    mainDisplay.setCursor(0,0);
+    mainDisplay.println("Bottom screen!");
+    mainDisplay.display();
+
+    secondaryDisplay.clearDisplay();
+    secondaryDisplay.setTextSize(1);
+    secondaryDisplay.setTextColor(SSD1306_WHITE);
+    secondaryDisplay.setCursor(0,0);
+    secondaryDisplay.println("Top screen!");
+    secondaryDisplay.display();
+
+    // connectToWifi(DEFAULT_WIFI_NETWORK, DEFAULT_WIFI_PASSWORD);
+
+    // auto initial = poll();
+    // lastA = initial & 0x01;
+    // lastB = initial & 0x02;
+
+    // timer1_attachInterrupt(pollInputReg);
+    // timer1_enable(TIM_DIV16, TIM_EDGE, TIM_LOOP);
+    // timer1_write(10000);
 }
 
 void loop() {
+    processInputs(poll());
+    displayButtonDebugState();
+
+    delay(100);
+    return;
     //if (!transactSimProps(props)) {
     //    return;
     //}
 
     transactSimProps(props);
 
-    display1.clearDisplay();
-    display1.setTextSize(1);
-    display1.setTextColor(SSD1306_WHITE);
-    display1.setCursor(0,0);
-    display1.print("Throttle: ");
-    display1.print(props.throttle);
-    display1.println("%");
+    mainDisplay.clearDisplay();
+    mainDisplay.setTextSize(1);
+    mainDisplay.setTextColor(SSD1306_WHITE);
+    mainDisplay.setCursor(0,0);
+    mainDisplay.print("Throttle: ");
+    mainDisplay.print(props.throttle);
+    mainDisplay.println("%");
 
-    display1.display();
+    mainDisplay.display();
 
     delay(100);
 }
@@ -194,22 +275,25 @@ bool transactSimProps(SimProps& props) {
     return true;
 }
 
-void initDisplay1() {
-    display1.begin(SSD1306_SWITCHCAPVCC, SCREEN_1_ADDR);
-    display1.clearDisplay();
+void initDisplays() {
+    mainDisplay.begin(SSD1306_SWITCHCAPVCC, MAIN_SCREEN_ADDR);
+    mainDisplay.clearDisplay();
+
+    secondaryDisplay.begin(SSD1306_SWITCHCAPVCC, SCND_SCREEN_ADDR);
+    secondaryDisplay.clearDisplay();
 }
 
 bool connectToWifi(const char* networkName, const char* password) {
-    display1.clearDisplay();
-    display1.setTextSize(2);
-    display1.setTextColor(SSD1306_WHITE);
-    display1.setCursor(0,0);
-    display1.cp437(true);
-    display1.print("Connecting");
-    display1.setTextSize(1);
-    display1.setCursor(0, 20);
-    display1.print(networkName);
-    display1.display();
+    mainDisplay.clearDisplay();
+    mainDisplay.setTextSize(2);
+    mainDisplay.setTextColor(SSD1306_WHITE);
+    mainDisplay.setCursor(0,0);
+    mainDisplay.cp437(true);
+    mainDisplay.print("Connecting");
+    mainDisplay.setTextSize(1);
+    mainDisplay.setCursor(0, 20);
+    mainDisplay.print(networkName);
+    mainDisplay.display();
 
     resetActivityIndicator();
 
@@ -222,39 +306,39 @@ bool connectToWifi(const char* networkName, const char* password) {
         delay(100);
         iterations++;
         if (iterations > timeoutIterations) {
-            display1.clearDisplay();
-            display1.setTextSize(2);
-            display1.setTextColor(SSD1306_WHITE);
-            display1.setCursor(0,0);
-            display1.println("Timed Out");
+            mainDisplay.clearDisplay();
+            mainDisplay.setTextSize(2);
+            mainDisplay.setTextColor(SSD1306_WHITE);
+            mainDisplay.setCursor(0,0);
+            mainDisplay.println("Timed Out");
             const auto status = WiFi.status();
             if (status == WL_NO_SHIELD) {
-                display1.print("WL_NO_SHIELD");
+                mainDisplay.print("WL_NO_SHIELD");
             } else if (status == WL_IDLE_STATUS) {
-                display1.print("WL_IDLE_STATUS");
+                mainDisplay.print("WL_IDLE_STATUS");
             } else if (status == WL_NO_SSID_AVAIL) {
-                display1.print("WL_NO_SSID_AVAIL");
+                mainDisplay.print("WL_NO_SSID_AVAIL");
             } else if (status == WL_SCAN_COMPLETED) {
-                display1.print("WL_SCAN_COMPLETED");
+                mainDisplay.print("WL_SCAN_COMPLETED");
             } else if (status == WL_CONNECT_FAILED) {
-                display1.print("WL_CONNECT_FAILED");
+                mainDisplay.print("WL_CONNECT_FAILED");
             } else if (status == WL_CONNECTION_LOST) {
-                display1.print("WL_CONNECTION_LOST");
+                mainDisplay.print("WL_CONNECTION_LOST");
             } else if (status == WL_DISCONNECTED) {
-                display1.print("WL_DISCONNECTED");
+                mainDisplay.print("WL_DISCONNECTED");
             }
-            display1.display();
+            mainDisplay.display();
             delay(1000);
             return false;
         }
     }
 
-    display1.clearDisplay();
-    display1.setTextSize(2);
-    display1.setTextColor(SSD1306_WHITE);
-    display1.setCursor(0,0);
-    display1.print("Connected!");
-    display1.display();
+    mainDisplay.clearDisplay();
+    mainDisplay.setTextSize(2);
+    mainDisplay.setTextColor(SSD1306_WHITE);
+    mainDisplay.setCursor(0,0);
+    mainDisplay.print("Connected!");
+    mainDisplay.display();
     delay(1000);
 
     return true;
@@ -273,7 +357,7 @@ void resetActivityIndicator() {
 }
 
 void iterateActivityIndictor() {
-    display1.fillRect(
+    mainDisplay.fillRect(
         ACTIVITY_INDICATOR_X - ACTIVITY_INDICATOR_RADIUS,
         ACTIVITY_INDICATOR_Y - ACTIVITY_INDICATOR_RADIUS,
         ACTIVITY_INDICATOR_RADIUS * 2,
@@ -289,14 +373,36 @@ void iterateActivityIndictor() {
         radius = ((float)scaler / HALF_FRAMES) * ACTIVITY_INDICATOR_RADIUS;
     }
 
-    display1.fillCircle(
+    mainDisplay.fillCircle(
         ACTIVITY_INDICATOR_X,
         ACTIVITY_INDICATOR_Y,
         radius,
         SSD1306_WHITE
     );
 
-    display1.display();
+    mainDisplay.display();
 
     activityIndicatorFrame = (activityIndicatorFrame + 1) % ACTIVITY_INDICATOR_FRAMES;
+}
+
+void drawButtonState(int x, int y, bool state) {
+    if (state) {
+        mainDisplay.fillCircle(x, y, 5, SSD1306_WHITE);
+    } else {
+        mainDisplay.drawCircle(x, y, 5, SSD1306_WHITE);
+    }
+}
+
+void displayButtonDebugState() {
+    mainDisplay.clearDisplay();
+    drawButtonState( 5, 48, inputs.dpad.left);
+    drawButtonState(15, 38, inputs.dpad.up);
+    drawButtonState(15, 58, inputs.dpad.down);
+    drawButtonState(25, 48, inputs.dpad.right);
+    drawButtonState(45, 48, inputs.a);
+    drawButtonState(57, 48, inputs.b);
+    drawButtonState( 5,  6, inputs.tl);
+    drawButtonState( 5,  18, inputs.bl);
+
+    mainDisplay.display();
 }
