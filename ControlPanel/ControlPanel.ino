@@ -50,8 +50,16 @@ struct DPad {
     bool right;
 };
 
+struct Encoder {
+    bool a;
+    bool b;
+    bool btn;
+};
+
 struct Inputs {
     DPad dpad;
+    Encoder enc1;
+    Encoder enc2;
     bool a;
     bool b;
     bool tl;
@@ -99,6 +107,12 @@ void processInputs(uint16_t raw) {
     inputs.dpad.up    = raw & 0x0200;
     inputs.dpad.down  = raw & 0x0400;
     inputs.dpad.right = raw & 0x0800;
+    inputs.enc1.btn = raw & 0x0040;
+    inputs.enc1.a = raw & 0x0008;
+    inputs.enc1.b = raw & 0x0004;
+    inputs.enc2.btn = raw & 0x0080;
+    inputs.enc2.a = raw & 0x00001;
+    inputs.enc2.b = raw & 0x00002;
     inputs.a =  raw & 0x1000;
     inputs.b =  raw & 0x2000;
     inputs.tl = raw & 0x4000;
@@ -177,6 +191,7 @@ void setup() {
 
 void loop() {
     auto raw = poll();
+    Serial.println(raw);
     processInputs(raw);
     displayButtonDebugState();
 
@@ -402,16 +417,22 @@ void drawButtonState(int x, int y, bool state) {
 
 void displayButtonDebugState() {
     mainDisplay.clearDisplay();
-    drawButtonState( 5, 48, inputs.dpad.left);
-    drawButtonState(15, 38, inputs.dpad.up);
-    drawButtonState(15, 58, inputs.dpad.down);
-    drawButtonState(25, 48, inputs.dpad.right);
-    drawButtonState(45, 48, inputs.a);
-    drawButtonState(57, 48, inputs.b);
-    drawButtonState( 5,  6, inputs.tl);
-    drawButtonState( 5,  18, inputs.bl);
-    drawButtonState(17,  6, inputs.tr);
-    drawButtonState(17,  18, inputs.br);
+    drawButtonState(  5, 48, inputs.dpad.left);
+    drawButtonState( 15, 38, inputs.dpad.up);
+    drawButtonState( 15, 58, inputs.dpad.down);
+    drawButtonState( 25, 48, inputs.dpad.right);
+    drawButtonState( 45, 48, inputs.a);
+    drawButtonState( 57, 48, inputs.b);
+    drawButtonState(  5,  6, inputs.tl);
+    drawButtonState(  5, 18, inputs.bl);
+    drawButtonState( 17,  6, inputs.tr);
+    drawButtonState( 17, 18, inputs.br);
+    drawButtonState(120,  6, inputs.enc1.btn);
+    drawButtonState(108,  6, inputs.enc1.a);
+    drawButtonState( 96,  6, inputs.enc1.b);
+    drawButtonState(120, 18, inputs.enc2.btn);
+    drawButtonState(108, 18, inputs.enc2.a);
+    drawButtonState( 96, 18, inputs.enc2.b);
 
     mainDisplay.display();
 }
