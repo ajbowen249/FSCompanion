@@ -27,10 +27,12 @@ char httpRecvBuffer[HTTP_BUFFER_SIZE];
 #define SH_IN_CLK 12
 #define SH_IN_LAT 13
 
-byte lastA = 0;
-byte lastB = 0;
-
 #define THROTTLE_SENSITIVITY 2
+
+#define ATTACH_TIMER()                            \
+    timer1_attachInterrupt(pollInputReg);         \
+    timer1_enable(TIM_DIV16, TIM_EDGE, TIM_LOOP); \
+    timer1_write(10000);                          \
 
 Adafruit_SSD1306 mainDisplay(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 Adafruit_SSD1306 secondaryDisplay(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
@@ -54,6 +56,8 @@ struct Encoder {
     bool a;
     bool b;
     bool btn;
+    bool inc;
+    bool dec;
 };
 
 struct Inputs {
@@ -108,48 +112,67 @@ void processInputs(uint16_t raw) {
     inputs.dpad.down  = raw & 0x0400;
     inputs.dpad.right = raw & 0x0800;
     inputs.enc1.btn = raw & 0x0040;
-    inputs.enc1.a = raw & 0x0008;
-    inputs.enc1.b = raw & 0x0004;
     inputs.enc2.btn = raw & 0x0080;
-    inputs.enc2.a = raw & 0x00001;
-    inputs.enc2.b = raw & 0x00002;
     inputs.a =  raw & 0x1000;
     inputs.b =  raw & 0x2000;
     inputs.tl = raw & 0x4000;
     inputs.bl = raw & 0x8000;
     inputs.tr = raw & 0x0020;
     inputs.br = raw & 0x0010;
+
+    inputs.enc1.inc = false;
+    inputs.enc1.dec = false;
+    inputs.enc2.inc = false;
+    inputs.enc2.dec = false;
+
+    auto newA1 = raw & 0x0008;
+    auto newB1 = raw & 0x0004;
+    auto newA2 = raw & 0x00001;
+    auto newB2 = raw & 0x00002;
+
+    if (newA1 && !inputs.enc1.a) {
+        if (!newB1) {
+            inputs.enc1.inc = true;
+        } else {
+            inputs.enc1.dec = true;
+        }
+    }
+
+    if (newA2 && !inputs.enc2.a) {
+        if (!newB2) {
+            inputs.enc2.inc = true;
+        } else {
+            inputs.enc2.dec = true;
+        }
+    }
+
+    inputs.enc1.a = newA1;
+    inputs.enc1.b = newB1;
+    inputs.enc2.a = newA2;
+    inputs.enc2.b = newB2;
 }
 
 void ICACHE_RAM_ATTR pollInputReg() {
-    timer1_detachInterrupt();
     if (transacting) {
         return;
     }
 
+    timer1_detachInterrupt();
+
     auto b = poll();
     processInputs(b);
 
-    timer1_attachInterrupt(pollInputReg);
-    timer1_enable(TIM_DIV16, TIM_EDGE, TIM_LOOP);
-    timer1_write(10000);
-
-    return;
-    auto newA = b & 0x01;
-    auto newB = b & 0x02;
-
-    if (newA && !lastA) {
-        if (!newB) {
-            props.throttle += THROTTLE_SENSITIVITY;
-        } else {
-            props.throttle -= THROTTLE_SENSITIVITY;
-        }
-
+    if (inputs.enc1.inc) {
+        props.throttle += THROTTLE_SENSITIVITY;
+        propsState.throttleDirty = true;
+    } else if (inputs.enc1.dec) {
+        props.throttle -= THROTTLE_SENSITIVITY;
         propsState.throttleDirty = true;
     }
 
-    lastA = newA;
-    lastB = newB;
+    ATTACH_TIMER()
+
+    return;
 }
 
 void setup() {
@@ -178,42 +201,37 @@ void setup() {
     secondaryDisplay.println("Top screen!");
     secondaryDisplay.display();
 
-    // connectToWifi(DEFAULT_WIFI_NETWORK, DEFAULT_WIFI_PASSWORD);
+    connectToWifi(DEFAULT_WIFI_NETWORK, DEFAULT_WIFI_PASSWORD);
 
-    // auto initial = poll();
-    // lastA = initial & 0x01;
-    // lastB = initial & 0x02;
+    // Get initial state so tracking is correct
+    auto raw = poll();
+    processInputs(raw);
+    inputs.enc1.inc = false;
+    inputs.enc1.dec = false;
+    inputs.enc2.inc = false;
+    inputs.enc2.dec = false;
 
-    // timer1_attachInterrupt(pollInputReg);
-    // timer1_enable(TIM_DIV16, TIM_EDGE, TIM_LOOP);
-    // timer1_write(10000);
+    ATTACH_TIMER()
 }
 
 void loop() {
-    auto raw = poll();
-    Serial.println(raw);
-    processInputs(raw);
     displayButtonDebugState();
 
-    delay(100);
-    return;
-    //if (!transactSimProps(props)) {
-    //    return;
-    //}
+    if (!transactSimProps(props)) {
+        return;
+    }
 
-    transactSimProps(props);
+    secondaryDisplay.clearDisplay();
+    secondaryDisplay.setTextSize(1);
+    secondaryDisplay.setTextColor(SSD1306_WHITE);
+    secondaryDisplay.setCursor(0,0);
+    secondaryDisplay.print("Throttle: ");
+    secondaryDisplay.print(props.throttle);
+    secondaryDisplay.println("%");
 
-    mainDisplay.clearDisplay();
-    mainDisplay.setTextSize(1);
-    mainDisplay.setTextColor(SSD1306_WHITE);
-    mainDisplay.setCursor(0,0);
-    mainDisplay.print("Throttle: ");
-    mainDisplay.print(props.throttle);
-    mainDisplay.println("%");
+    secondaryDisplay.display();
 
-    mainDisplay.display();
-
-    delay(100);
+    delay(50);
 }
 
 bool transactSimProps(SimProps& props) {
