@@ -44,14 +44,53 @@ namespace SimConnectBridge
                 _adaptor.TryConnect();
             };
 
+            ThrottleSlider.ValueChanged += (s, e) => {
+                var update = new SimConnectAdaptor.SimPropsUpdate();
+                update.throttle = ThrottleSlider.Value;
+                _adaptor.SetSimProps(update);
+            };
+
+            MixtureSlider.ValueChanged += (s, e) => {
+                var update = new SimConnectAdaptor.SimPropsUpdate();
+                update.mixture = MixtureSlider.Value;
+                _adaptor.SetSimProps(update);
+            };
+
+            ElevatorTrimSlider.ValueChanged += (s, e) => {
+                var update = new SimConnectAdaptor.SimPropsUpdate();
+                update.elevatorTrim = ElevatorTrimSlider.Value;
+                _adaptor.SetSimProps(update);
+            };
+
+            DecFlapsButton.Click += (s, e) => {
+                var props = _adaptor.GetSimProps();
+                var update = new SimConnectAdaptor.SimPropsUpdate();
+                update.flapsIndex = props.flapsIndex - 1;
+                _adaptor.SetSimProps(update);
+            };
+
+            IncFlapsButton.Click += (s, e) => {
+                var props = _adaptor.GetSimProps();
+                var update = new SimConnectAdaptor.SimPropsUpdate();
+                update.flapsIndex = props.flapsIndex + 1;
+                _adaptor.SetSimProps(update);
+            };
+
             _pollTimer = new DispatcherTimer();
             _pollTimer.Tick += (s, e) => {
                 ConnectedStatus.Text = _adaptor.IsConnected ? "Connected" : "Disconnected";
                 ConnectedStatus.Background = _adaptor.IsConnected ? Brushes.Green : Brushes.Yellow;
                 ReconnectButton.IsEnabled = !_adaptor.IsConnected;
+
+                var simProps = _adaptor.GetSimProps();
+
+                ThrottleSlider.Value = simProps.throttle;
+                MixtureSlider.Value = simProps.mixture;
+                ElevatorTrimSlider.Value = simProps.elevatorTrim;
+                FlapsDisplay.Text = $"({simProps.flapsIndex}/{simProps.flapsPositions})";
             };
 
-            _pollTimer.Interval = new TimeSpan(0, 0, 0, 0, 10);
+            _pollTimer.Interval = new TimeSpan(0, 0, 0, 0, 100);
             _pollTimer.Start();
 
             _isInitialized = true;

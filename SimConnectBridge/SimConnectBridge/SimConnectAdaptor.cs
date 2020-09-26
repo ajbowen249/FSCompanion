@@ -13,23 +13,38 @@ using System.Runtime.Serialization;
 namespace SimConnectBridge {
     public class SimConnectAdaptor {
         private enum Definitions {
-            Throttle = 0x01
+            Throttle = 0x01,
+            Mixture =  0x02,
+            ElevatorTrim =  0x03,
+            FlapsPositions = 0x04,
+            FlapsIndex = 0x05,
         }
 
-        struct ThrottleControl {
-            public double throttlePercent;
+        struct DoubleProp {
+            public double value;
+        }
+
+        struct IntProp {
+            public int value;
         }
 
         [DataContract]
         public class SimProps {
             [DataMember]
             public double throttle;
+            public double mixture;
+            public double elevatorTrim;
+            public int flapsPositions;
+            public int flapsIndex;
         }
 
         [DataContract]
         public class SimPropsUpdate {
             [DataMember]
             public double? throttle;
+            public double? mixture;
+            public double? elevatorTrim;
+            public int? flapsIndex;
         }
 
         private const int WM_USER_SIMCONNECT = 0x0402;
@@ -59,16 +74,23 @@ namespace SimConnectBridge {
             lock (_rwLock) {
                 if (update.throttle != null) {
                     _simProps.throttle = (double)update.throttle;
+                    SetDoubleProp(Definitions.Throttle, _simProps.throttle);
                 }
 
-                if (!IsConnected) {
-                    return _simProps;
+                if (update.mixture != null) {
+                    _simProps.mixture = (double)update.mixture;
+                    SetDoubleProp(Definitions.Mixture, _simProps.mixture);
                 }
 
-                ThrottleControl tc;
-                tc.throttlePercent = _simProps.throttle;
+                if (update.elevatorTrim != null) {
+                    _simProps.elevatorTrim = (double)update.elevatorTrim;
+                    SetDoubleProp(Definitions.ElevatorTrim, _simProps.elevatorTrim);
+                }
 
-                _simConnect.SetDataOnSimObject(Definitions.Throttle, (uint)SIMCONNECT_SIMOBJECT_TYPE.USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, tc);
+                if (update.flapsIndex != null) {
+                    _simProps.flapsIndex = (int)update.flapsIndex;
+                    SetIntProp(Definitions.FlapsIndex, _simProps.flapsIndex);
+                }
 
                 return _simProps;
             }
@@ -92,9 +114,11 @@ namespace SimConnectBridge {
 
         private void ConfigureSimConnectData() {
             _simConnect.OnRecvSimobjectData += new SimConnect.RecvSimobjectDataEventHandler(OnReceiveSimObjectData);
-            _simConnect.AddToDataDefinition(Definitions.Throttle, "GENERAL ENG THROTTLE LEVER POSITION:1", "percent", SIMCONNECT_DATATYPE.FLOAT64, 0.0f, SimConnect.SIMCONNECT_UNUSED);
-            _simConnect.RegisterDataDefineStruct<ThrottleControl>(Definitions.Throttle);
-            _simConnect.RequestDataOnSimObject(Definitions.Throttle, Definitions.Throttle, SC_UserId, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.CHANGED, 0, 0, 0);
+            RegisterDoubleProp(Definitions.Throttle, "GENERAL ENG THROTTLE LEVER POSITION:1", "percent");
+            RegisterDoubleProp(Definitions.Mixture, "GENERAL ENG MIXTURE LEVER POSITION:1", "percent");
+            RegisterDoubleProp(Definitions.ElevatorTrim, "ELEVATOR TRIM POSITION", "radians");
+            RegisterIntProp(Definitions.FlapsPositions, "FLAPS NUM HANDLE POSITIONS", "number");
+            RegisterIntProp(Definitions.FlapsIndex, "FLAPS HANDLE INDEX", "number");
         }
 
         private void OnDisconnected() {
@@ -105,8 +129,19 @@ namespace SimConnectBridge {
             lock (_rwLock) {
                 switch((Definitions)data.dwRequestID) {
                     case Definitions.Throttle:
-                        var tc = (ThrottleControl)data.dwData[0];
-                        _simProps.throttle = tc.throttlePercent;
+                        _simProps.throttle = ReadDoubleProp(data);
+                        break;
+                    case Definitions.Mixture:
+                        _simProps.mixture = ReadDoubleProp(data);
+                        break;
+                    case Definitions.ElevatorTrim:
+                        _simProps.elevatorTrim = ReadDoubleProp(data);
+                        break;
+                    case Definitions.FlapsPositions:
+                        _simProps.flapsPositions = ReadIntProp(data);
+                        break;
+                    case Definitions.FlapsIndex:
+                        _simProps.flapsIndex = ReadIntProp(data);
                         break;
                     default:
                         break;
@@ -141,6 +176,42 @@ namespace SimConnectBridge {
             }
 
             return IntPtr.Zero;
+        }
+
+        private void SetDoubleProp(Definitions field, double value) {
+            if (IsConnected) {
+                DoubleProp prop;
+                prop.value = value;
+                _simConnect.SetDataOnSimObject(field, (uint)SIMCONNECT_SIMOBJECT_TYPE.USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, prop);
+            }
+        }
+
+        private void SetIntProp(Definitions field, int value) {
+            if (IsConnected) {
+                IntProp prop;
+                prop.value = value;
+                _simConnect.SetDataOnSimObject(field, (uint)SIMCONNECT_SIMOBJECT_TYPE.USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, prop);
+            }
+        }
+
+        private double ReadDoubleProp(SIMCONNECT_RECV_SIMOBJECT_DATA data) {
+            return ((DoubleProp)data.dwData[0]).value;
+        }
+
+        private int ReadIntProp(SIMCONNECT_RECV_SIMOBJECT_DATA data) {
+            return ((IntProp)data.dwData[0]).value;
+        }
+
+        private void RegisterDoubleProp(Definitions field, string name, string unit) {
+            _simConnect.AddToDataDefinition(field, name, unit, SIMCONNECT_DATATYPE.FLOAT64, 0.0f, SimConnect.SIMCONNECT_UNUSED);
+            _simConnect.RegisterDataDefineStruct<DoubleProp>(field);
+            _simConnect.RequestDataOnSimObject(field, field, SC_UserId, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.CHANGED, 0, 0, 0);
+        }
+
+        private void RegisterIntProp(Definitions field, string name, string unit) {
+            _simConnect.AddToDataDefinition(field, name, unit, SIMCONNECT_DATATYPE.INT32, 0.0f, SimConnect.SIMCONNECT_UNUSED);
+            _simConnect.RegisterDataDefineStruct<IntProp>(field);
+            _simConnect.RequestDataOnSimObject(field, field, SC_UserId, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.CHANGED, 0, 0, 0);
         }
     }
 }

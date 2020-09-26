@@ -5,9 +5,38 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:SimConnectBridge"
         mc:Ignorable="d"
-        Title="SimConnect Bridge Status" Height="80" Width="330">
+        Title="SimConnect Bridge Status" Height="160" Width="330">
     <StackPanel>
-         <TextBlock Name="ConnectedStatus" Text="Unknown"/>
+        <TextBlock Name="ConnectedStatus" Text="Unknown"/>
         <Button Name="ReconnectButton">Reconnect</Button>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Grid.RowDefinitions>
+                <RowDefinition />
+                <RowDefinition />
+                <RowDefinition />
+                <RowDefinition />
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Throttle" />
+            <Slider    Grid.Row="0" Grid.Column="1" Name="ThrottleSlider" Minimum="0" Maximum="100" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Mixture" />
+            <Slider    Grid.Row="1" Grid.Column="1" Name="MixtureSlider" Minimum="0" Maximum="100" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="El. Trim" />
+            <Slider    Grid.Row="2" Grid.Column="1" Name="ElevatorTrimSlider" Minimum="-1" Maximum="1" />
+
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Flaps" />
+            <StackPanel Orientation="Horizontal" Grid.Row="3" Grid.Column="1">
+                <Button Name="DecFlapsButton">-</Button>
+                <Button Name="IncFlapsButton">+</Button>
+                <TextBlock Name="FlapsDisplay" />
+            </StackPanel>
+        </Grid>
     </StackPanel>
 </Window>
